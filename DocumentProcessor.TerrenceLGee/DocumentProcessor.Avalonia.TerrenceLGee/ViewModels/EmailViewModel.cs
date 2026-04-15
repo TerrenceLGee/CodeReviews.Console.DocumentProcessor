@@ -1,4 +1,6 @@
-﻿using Avalonia.Controls;
+﻿using Avalonia;
+using Avalonia.Controls;
+using Avalonia.Platform.Storage;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using CommunityToolkit.Mvvm.Messaging;
@@ -10,6 +12,8 @@ using MailKit.Net.Smtp;
 using MsBox.Avalonia;
 using MsBox.Avalonia.Enums;
 using System;
+using System.Collections.Generic;
+using System.Collections.ObjectModel;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using System.Threading.Tasks;
@@ -44,7 +48,6 @@ public partial class EmailViewModel : ObservableValidator
         .FirstOrDefault()?.ErrorMessage;
 
     [ObservableProperty]
-    [Required(ErrorMessage = "Email subject is required.")]
     [MaxLength(200, ErrorMessage = "Email subject cannot exceed 200 characters.")]
     [NotifyPropertyChangedFor(nameof(EmailSubjectErrors))]
     private string _subject = string.Empty;
@@ -64,6 +67,17 @@ public partial class EmailViewModel : ObservableValidator
     [ObservableProperty]
     private string? _errorMessage;
 
+    public ObservableCollection<Attachment> Attachments { get; set; } = [];
+
+    [ObservableProperty]
+    private Attachment? _selectedAttachment;
+
+    [ObservableProperty]
+    private List<Attachment> _attachmentFilePaths;
+
+    [ObservableProperty]
+    private string? _filePath;
+
     public EmailViewModel(
         IEmailService emailService,
         IRetryService retryService,
@@ -76,6 +90,7 @@ public partial class EmailViewModel : ObservableValidator
         _contactToEmail = contactToEmail;
         _receiverName = $"{contactToEmail.FirstName} {contactToEmail.LastName}";
         _receiverEmail = contactToEmail.EmailAddress;
+        _attachmentFilePaths = [];
     }
 
     [RelayCommand]
@@ -95,12 +110,15 @@ public partial class EmailViewModel : ObservableValidator
             return;
         }
 
+        AddAttachments();
+
         var emailData = new EmailData
         {
             ReceiverName = ReceiverName,
             ReceiverEmail = ReceiverEmail,
-            Subject = Subject,
-            Body = Body
+            Subject = (!string.IsNullOrEmpty(Subject)) ? Subject : "(no subject)",
+            Body = Body,
+            Attachments = AttachmentFilePaths
         };
 
         try
@@ -117,6 +135,7 @@ public partial class EmailViewModel : ObservableValidator
                     null, WindowStartupLocation.CenterOwner);
 
                 await box.ShowAsync();
+                ClearAttachments();
                 ClearFields();
             }
             else
@@ -137,6 +156,60 @@ public partial class EmailViewModel : ObservableValidator
                 .GetMessageBoxStandard("Error", $"{ErrorMessage}", ButtonEnum.Ok, Icon.Error,
                 null, WindowStartupLocation.CenterOwner);
         } 
+    }
+
+    [RelayCommand]
+    private async Task AddAttachmentAsync(Visual? visual)
+    {
+        var topLevel = TopLevel.GetTopLevel(visual);
+        if (topLevel is null) return;
+
+        var options = new FilePickerOpenOptions
+        {
+            Title = "Add Attachment",
+            AllowMultiple = true
+        };
+
+        var paths = await topLevel
+            .StorageProvider
+            .OpenFilePickerAsync(options);
+
+        if (paths.Count == 0 || paths is null) return;
+
+        foreach (var path in paths)
+        {
+            var tempPath = path.Path.PathAndQuery.ToString();
+            var FilePath = tempPath.Replace("%20", " ");
+            var attachment = new Attachment { FilePath = FilePath };
+            Attachments.Add(attachment);
+        }
+    }
+
+    private void AddAttachments()
+    {
+        if (Attachments.Count > 0)
+        {
+            foreach (var attachment in Attachments)
+            {
+                AttachmentFilePaths.Add(attachment);
+            }
+        }
+    }
+
+    [RelayCommand]
+    private void RemoveAttachment()
+    {
+        if (SelectedAttachment is not null)
+        {
+            Attachments.Remove(SelectedAttachment);
+            SelectedAttachment = null;
+        }
+    }
+
+    [RelayCommand]
+    private void ClearAttachments()
+    {
+        Attachments.Clear();
     }
 
     [RelayCommand]
